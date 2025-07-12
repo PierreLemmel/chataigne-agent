@@ -1,13 +1,15 @@
 import { createTool } from "@mastra/core/tools";
 import { delay } from "@mastra/core/utils";
 import OSC from "osc-js";
+import { OSCQueryDiscovery, OSCQueryServer } from "oscquery";
 import z from "zod";
+import { ChataignesParamTypes } from "../../lib/chataigne";
 
 
 const baseInputProperties = {
     address: z.string(),
-    port: z.number().optional().default(42000),
-    host: z.string().optional().default("localhost"),
+    port: z.number().int().default(42000),
+    host: z.string().default("localhost"),
 }
 
 const baseInputSchema = z.object(baseInputProperties);
@@ -63,6 +65,7 @@ export type EnumInput = z.infer<typeof enumInputSchema>;
 export type ColorInput = z.infer<typeof colorInputSchema>;
 export type Point2DInput = z.infer<typeof point2DInputSchema>;
 export type Point3DInput = z.infer<typeof point3DInputSchema>;
+
 
 
 const baseOutputProperties = {
@@ -200,6 +203,33 @@ export const setChataignePoint3DVariableTool = createTool({
     },
 })
 
+
+
+export const getChataigneValueInputSchema = z.object({
+    ...baseInputProperties,
+});
+
+export type GetChataigneValueInput = z.infer<typeof getChataigneValueInputSchema>;
+
+
+export const getChataigneValueOutputSchema = z.object({
+    ...baseOutputProperties,
+    value: z.any().optional(),
+    type: z.enum(ChataignesParamTypes),
+});
+
+export type GetChataigneValueOutput = z.infer<typeof getChataigneValueOutputSchema>;
+
+export const getChataigneValueTool = createTool({
+    id: 'get-chataigne-value-tool',
+    description: 'Get a value from chataigne or indicates that the server does not have received the value yet',
+    inputSchema: getChataigneValueInputSchema,
+    outputSchema: getChataigneValueOutputSchema,
+    execute: async ({ context }) => {
+        return await getChataigneValue(context);
+    },
+})
+
 export const chataigneTools = {
     setChataigneStringVariableTool,
     setChataigneIntegerVariableTool,
@@ -209,62 +239,76 @@ export const chataigneTools = {
     setChataigneColorVariableTool,
     setChataignePoint2DVariableTool,
     setChataignePoint3DVariableTool,
+    getChataigneValueTool,
 }
 
-type OSCData = {
-    host: string;
-    port: number;
-    osc: OSC;
+
+
+
+type OscData = {
+    host: string,
+    port: number,
+    osc: OSC,
 }
 
-let oscData: OSCData|null = null;
-const getOsc = async (host: string, port: number) => {
-    if (!oscData) {
-        oscData = {
-            host,
-            port,
-            osc: new OSC()
-        }
-        oscData.osc.open({ host, port })
+let oscOut: OscData|null = null;
 
+
+const getOscOut = async (host: string, port: number): Promise<OSC> => {
+
+    if (!oscOut) {
+
+        const osc = new OSC()
+        osc.open({ host, port })
+    
         while (true) {
-
-            const status = oscData.osc.status()
-
+    
+            const status = osc.status()
+    
             if (status === OSC.STATUS.IS_OPEN) {
                 break
             } else if (status === OSC.STATUS.IS_CONNECTING) {
                 await delay(100)
             } else {
+                
                 throw new Error(`Unexpected OSC status: ${status}`)
             }
         }
+
+        oscOut = {
+            host,
+            port,
+            osc,
+        }
+
+        return osc;
     }
 
-    if (oscData.host !== host
-        || oscData.port !== port
-        || oscData.osc.status() !== OSC.STATUS.IS_OPEN
-    ) {
-        oscData.osc.close()
-        oscData = null
-        const newOsc = await getOsc(host, port)
+    if (oscOut.osc.status() !== OSC.STATUS.IS_OPEN
+        || oscOut.host !== host
+        || oscOut.port !== port) {
+        oscOut.osc.close()
+        oscOut = null
 
-        return newOsc
+        const newOsc = await getOscOut(host, port)
+        return newOsc;
     }
 
-    return oscData.osc;
+    return oscOut.osc;
 }
+
+
 
 async function sendChataigneVariable<T>(input: BaseInput<T>): Promise<{ address: string, value: T }> {
 
     const {
         address,
-        value,
+        host,
         port,
-        host
+        value,
     } = input
 
-    const osc = await getOsc(host, port);
+    const osc = await getOscOut(host, port);
 
     const args = Array.isArray(value) ? value : [value]
     const message = new OSC.Message(address, ...args)
@@ -275,4 +319,33 @@ async function sendChataigneVariable<T>(input: BaseInput<T>): Promise<{ address:
         address,
         value,
     };
+}
+
+async function getChataigneValue(input: GetChataigneValueInput): Promise<GetChataigneValueOutput> {
+
+    const {
+        address,
+        host,
+        port,
+    } = input
+
+
+    const chunks = address.split("/");
+    const varName = chunks.pop()!;
+    const newAddress = chunks.join("/");
+    
+    const response = await fetch(`http://${host}:${port}${newAddress}`)
+    const json = await response.json()
+
+    const variable = json["CONTENTS"][varName]
+    const value = variable["VALUE"][0]
+    const type = variable["EXTENDED_TYPE"][0]
+    
+
+    return {
+        address: newAddress,
+        value,
+        type
+    }
+
 }

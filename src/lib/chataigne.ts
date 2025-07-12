@@ -11,6 +11,7 @@ export const ChataignesParamTypes = [
 
 export type ChataigneParamType = (typeof ChataignesParamTypes)[number];
 
+export type ChataigneColorRepresentation = [number, number, number, number];
 
 export const ChataigneModuleTypes = [
     "OS",

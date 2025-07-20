@@ -65,7 +65,7 @@ export const discoverOscQueryServicesTool = createTool({
     inputSchema: z.object({}),
     outputSchema: discoverOscQueryOutputSchema,
     execute: async ({ context }) => {
-        const services = discovery.getServices().map(service => {
+        const services = await Promise.all(discovery.getServices().map(async (service) => {
 
             const {
                 address,
@@ -78,8 +78,11 @@ export const discoverOscQueryServicesTool = createTool({
                 nodes,
             } = service
 
-            const serializedNodes = nodes.serialize();
-            const nodesSummary = getNodeSummary(serializedNodes)
+
+            const response = await fetch(`http://${address}:${port}/`)
+            const rootNode = await response.json()
+
+            const nodesSummary = getNodeSummary(rootNode)
 
             return ({
                 address,
@@ -89,7 +92,7 @@ export const discoverOscQueryServicesTool = createTool({
                 oscTransport,
                 nodes: nodesSummary,
             } satisfies typeof services[number]);
-        })
+        }))
 
         return services
     }
@@ -97,6 +100,7 @@ export const discoverOscQueryServicesTool = createTool({
 
 
 const getNodeSummary = (rootNode: SerializedNode): ChataigneProjectSummary => {
+
 
     const modules: ChataigneProjectSummary["modules"] = Object.entries(rootNode.CONTENTS?.modules?.CONTENTS ?? {}).map(([name, module]) => {
         return {
@@ -107,7 +111,7 @@ const getNodeSummary = (rootNode: SerializedNode): ChataigneProjectSummary => {
     });
 
     const states: ChataigneProjectSummary["states"] = Object.entries(rootNode.CONTENTS?.states?.CONTENTS ?? {}).filter(([name, state]) => {
-        return getNodeType(state) === "Stt";
+        return getNodeType(state) === "State";
     }).map(([name, state]) => {
         return {
             name,
@@ -115,21 +119,30 @@ const getNodeSummary = (rootNode: SerializedNode): ChataigneProjectSummary => {
         }
     });
 
-    const variableGroups: ChataigneProjectSummary["variableGroups"] = Object.entries(rootNode.CONTENTS?.customVariables?.CONTENTS ?? {}).map(([name, group]) => {
-        return {
-            name,
-            fullPath: getNodeFullPath(group),
-            elements: Object.entries(group.CONTENTS?.variables?.CONTENTS ?? {}).map(([name, variable]) => {
-                return {
-                    name,
-                    fullPath: getNodeFullPath(variable),
-                    type: getNodeType(variable),
-                    value: getNodeValue(variable),
-                    info : getNodeRange(variable),
-                }
-            }),
-        }
-    });
+    const variableGroups: ChataigneProjectSummary["variableGroups"] = Object.entries(rootNode.CONTENTS?.customVariables?.CONTENTS ?? {})
+        .filter(([name, group]) => {
+            const type = getNodeType(group);
+            return type === "CVGroup";
+        })
+        .map(([name, group]) => {
+
+            return {
+                name,
+                fullPath: getNodeFullPath(group),
+                elements: Object.entries(group.CONTENTS?.variables?.CONTENTS ?? {}).map(([name, variable]) => {
+
+                    const value = variable.CONTENTS?.[name] as any;
+
+                    return {
+                        name,
+                        fullPath: getNodeFullPath(value),
+                        type: getNodeType(value),
+                        value: getNodeValue(value),
+                        info : getNodeRange(value),
+                    }
+                }),
+            }
+        });
 
     return {
         modules,
@@ -172,9 +185,9 @@ const getNodeRange = (node: SerializedNode) => {
         result.max = range.MAX;
         hasResult = true;
     }
-
     if (range.VALS !== undefined) {
         result.values = range.VALS;
+        hasResult = true;
     }
 
     return hasResult ? result : undefined;
@@ -197,7 +210,7 @@ const getNodeType = (node: SerializedNode): string => {
 
     const extendedType = node["EXTENDED_TYPE"]?.[0];
     if (extendedType) {
-        return extendedType[0];
+        return extendedType;
     }
 
     const type = node["TYPE"];

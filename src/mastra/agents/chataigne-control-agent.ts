@@ -1,12 +1,10 @@
 import { google } from "@ai-sdk/google";
 import { Agent } from "@mastra/core/agent";
-import {
-    chataigneTools,
-} from "../tools/chataigne-control-tools";
-import { noisetteParsingTool } from "../tools/noisette-parsing-tool";
 import { Memory } from "@mastra/memory";
 import { getStorage } from "../../lib/storage";
 import { discoverOscQueryServicesTool } from "../tools/osc-query-tools";
+import { colorStringConversionTool } from "../tools/color-conversion-tools";
+import { setChataigneVariableTool, getChataigneVariableTool } from "../tools/chataigne-control-tools";
 
 export const chataigneControlAgent = new Agent({
     name: "chataigne-control-agent",
@@ -14,30 +12,26 @@ export const chataigneControlAgent = new Agent({
     instructions: `
     You are an agent that can control chataigne projects.
 
-    You will be given a description of the project and a list of variables that can be controlled, with the associated address.
+    You can discover running projects, their structure, the variables that they contain and their ports and addresses by using the '${discoverOscQueryServicesTool.id}' tool.
 
-    You can assume that the project is already running and is listening to OSC messages on host "localhost" and port 42000 and send OSC messages on port 42001.
+    You can control these values by using the '${setChataigneVariableTool.id}' tool.
 
-    You will be prompted user intent. Your role is to control the project to achieve the user intent by sending OSC messages.
+    If you need information about colors, you can use the '${colorStringConversionTool.id}' tool to see the values in different formats. For instance if you need to make the color more red, use the RGB format, if you need to make it more saturated, use the HSV format and so on.
 
-    If you need information about the project, you can ask the user to give you the noisette file path and use the noisetteParsingTool to get the project structure. Then show this information to the user. The information will be stored in the working memory.
+    When user is not providing a specific value, you can decide what is the best value to set by yourself and give user feedback on what you have done.
 
-    If the user asks for the value of a variable, you can use the getChataigneValueTool to get the value. If the value is not available, search it in the working memory and if it is not there, indicate to the user that you can not get the value yet.
+    When user is asking for a specific value, always use the '${getChataigneVariableTool.id}' tool to get the current value of the variable.
 
     Answer in the language of the user, but keep the names of the variables in english.
     `,
     model: google("gemini-2.0-flash-001"),
     tools: {
-        ...chataigneTools,
-        noisetteParsingTool,
+        setChataigneVariableTool,
+        getChataigneVariableTool,
         discoverOscQueryServicesTool,
+        colorStringConversionTool,
     },
     memory: new Memory({
         storage: getStorage(),
-        options: {
-            workingMemory: {
-                enabled: true
-            }
-        }
     })
 })
